@@ -1,0 +1,97 @@
+#!/bin/bash
+#Command: runGOAT name(.xyz)
+############################################################################################################################
+# Run GOAT for the specified xyz file. job file is generated and run in addition to inp file.
+############################################################################################################################
+# For other users, these are the variables you need to change:
+acc="kurten"
+orcabin="projappl/kurten/appl_robert/orca_6_0_1_linux_x86-64_shared_openmpi416"
+
+g=$(echo $1)
+
+echo "Time?"
+read TIME
+echo "Charge and multiplicity?"
+read cm
+echo "Number of parallel processes?"
+read CORES
+echo "Memory per core?" 
+read MEM
+echo "Select the partition: small, large, test, etc..."
+read QUEUE
+echo "Level of theory? Method Basis"
+read THEO
+echo "Max energy cutoff?"
+read MaxEn
+echo "Geometry modifier (Hessian, Constraints, Scan), yes/no?" 
+read geom
+if [[ "$geom" == "yes" ]];  then
+nano input.txt 
+fi
+
+# Find the exact name of the file, in case input was simplified.
+NAME=`echo "$g.xyz" | cut -d'.' -f1`
+
+( echo "! $THEO GOAT
+
+%pal
+nprocs=$CORES
+end
+
+%maxcore $MEM
+
+%goat
+MaxEn $MaxEn
+Skipinitialopt True
+Align True
+end
+"
+
+if [[ "$geom" == "yes" ]];  then
+echo "%geom"
+cat input.txt 
+echo "end
+"
+fi
+
+echo "* xyz $cm";
+tail -n +3 $NAME.xyz;
+echo "*" ) > $NAME-Goat.inp
+
+# Create .job file
+echo "#!/bin/bash -l
+#SBATCH -J Goat-$NAME
+#SBATCH -t $TIME
+#SBATCH --ntasks-per-node $CORES
+#SBATCH --nodes 1
+#SBATCH --account=$acc
+#SBATCH --mem-per-cpu=$MEM
+#SBATCH -p $QUEUE
+#SBATCH --gres=nvme:50
+
+module purge
+module load gcc/11.3.0 intel-oneapi-mkl/2022.1.0 openmpi/4.1.4
+
+export ORCA_DIR=$orcabin
+export LD_LIBRARY_PATH=\$ORCA_DIR:\$LD_LIBRARY_PATH
+
+echo exec 'srun \$(echo \"\${@}\" | sed 's/^-np/-n/')' > ./mpirun
+chmod +x ./mpirun
+export PATH=\${SLURM_SUBMIT_DIR}:\${PATH}
+
+export ORCA_TMPDIR=\$LOCAL_SCRATCH
+cp \$SLURM_SUBMIT_DIR/$NAME-Goat.inp \$ORCA_TMPDIR/
+cd \$ORCA_TMPDIR
+
+\$ORCA_DIR/orca $NAME-Goat.inp > \${SLURM_SUBMIT_DIR}/$NAME-Goat.out
+rm -f  \${SLURM_SUBMIT_DIR}/mpirun
+cp -r \$ORCA_TMPDIR \$SLURM_SUBMIT_DIR
+cd \$SLURM_SUBMIT_DIR
+mv data/* .
+seff \$SLURM_JOBID
+rmdir data
+" > $NAME-Goat.job
+
+sbatch $NAME-Goat.job
+
+rm input.txt

@@ -1,0 +1,100 @@
+#!/bin/bash
+#Command: NextLevelInput name
+##################################################################################################################################
+# Generates a CCSD(T) single point input file for one or several xyz files in the directory. Also generates a job file and runs it.
+##################################################################################################################################
+
+# For other users: These are the variables you may want to change:
+acc="kurten"
+orcabin="projappl/kurten/appl_robert/orca_6_0_1_linux_x86-64_shared_openmpi416"
+
+
+sjstat -c
+
+g=$(echo $1)
+
+echo "Time?"
+read TIME
+echo "Charge and multiplicity?"
+read cm
+echo "Number of parallel processes?"
+read core
+echo "Memory per core?" 
+read memcore
+echo "Local disk space?"
+read disk
+
+echo "DLPNO approximation? y/n"
+read DLPNO
+if [ "$DLPNO" = "y" ]; then
+cmndline="! UHF DLPNO-CCSD(T)-F12 cc-pVDZ-F12 cc-pVDZ-F12-CABS cc-pVTZ/C TightPNO TightSCF"
+else
+cmndline="! UHF CCSD(T)-F12/RI cc-pVDZ-F12 cc-pVDZ-F12-CABS cc-pVTZ/C TightSCF"
+fi
+
+ls *$g*.xyz > mylist.txt		
+
+while [ -s mylist.txt ]	      	      			#while the file is not empty
+do
+read -r f < mylist.txt					#Reads first line from mylist
+NAME=`echo "$f" | cut -d'.' -f1`
+sed -i '1d' mylist.txt
+
+if [[ ${NAME: -3} == "trj" ]]; then  # Skip trajectory files auto-generated from geometry optimization jobs. 
+        continue
+fi
+
+( echo "$cmndline
+
+%pal
+nprocs=$core
+end
+
+%maxcore $memcore
+"
+echo "* xyz $cm";
+tail -n +3 $NAME.xyz;
+echo "*" ) > $NAME-F12.inp
+
+# Create .job file
+echo "#!/bin/bash -l
+#SBATCH -J $NAME-F12
+#SBATCH -t $TIME
+#SBATCH --ntasks-per-node $core
+#SBATCH --nodes 1
+#SBATCH --account=$acc
+#SBATCH --mem-per-cpu=$memcore
+#SBATCH -p hugemem
+#SBATCH --gres=nvme:$disk
+
+module purge
+module load gcc/11.3.0 intel-oneapi-mkl/2022.1.0 openmpi/4.1.4
+
+export ORCA_DIR=$orcabin
+export LD_LIBRARY_PATH=\$ORCA_DIR:\$LD_LIBRARY_PATH
+
+echo exec 'srun \$(echo \"\${@}\" | sed 's/^-np/-n/')' > ./mpirun
+chmod +x ./mpirun
+export PATH=\${SLURM_SUBMIT_DIR}:\${PATH}
+
+export ORCA_TMPDIR=\$LOCAL_SCRATCH
+cp \$SLURM_SUBMIT_DIR/$NAME-F12.inp \$ORCA_TMPDIR/
+cd \$ORCA_TMPDIR
+
+\$ORCA_DIR/orca $NAME-F12.inp > \${SLURM_SUBMIT_DIR}/$NAME-F12.out
+rm -f  \${SLURM_SUBMIT_DIR}/mpirun
+cp -r \$ORCA_TMPDIR \$SLURM_SUBMIT_DIR
+cd \$SLURM_SUBMIT_DIR
+mv data/* .
+seff \$SLURM_JOBID
+rmdir data "  > $NAME-F12.job
+
+echo "Sumbit? (y/n)"
+read Sub
+if [ "$Sub" = "y" ]; then
+sbatch $NAME-F12.job
+fi
+
+done
+
+rm mylist.txt                                        # Remove unnecessary input file

@@ -1,0 +1,223 @@
+#!/bin/bash
+############################################################################################################################
+# This scripts reads GOAT's finalensemble.xyz output and generates ORCA input files for each conformer. 
+# A B3LYP-D3 ma-def2-SVP optimization is run by default. 
+############################################################################################################################
+
+acc="kurten"
+orcabin="projappl/kurten/appl_robert/orca_6_0_1_linux_x86-64_shared_openmpi416"
+
+  
+#input values
+echo "$f charge? (-1, 0 or 1)"
+read charge
+echo "$f multiplicity? (1 for closed-shell or 2 for radical)"
+read multiplicity
+echo "Calculation time of $f in hh:mm:ss format?"
+read time
+echo "How many computing cores? (128 per node)"
+read CORES
+echo "Memory per core?"
+read MEM
+echo "Name your molecule."
+read Mol
+echo "Single-point? (y/n)" 
+read SP
+echo "Geometry constraints? (y/n)"
+read TS
+if [ "$TS" == "y" ]; then    # Open file and write constaints
+nano const.txt
+fi
+
+# Create copy of final ensemble file and make an input file for each conformer.
+# This way the original file is preserved if something goes wrong.
+cp *finalensemble.xyz copy.xyz
+k=0 
+while [ -s copy.xyz ]
+do
+k=$(($k+1))
+noa=$(head  -1 copy.xyz )
+sed -n "1,$((noa+2)) p" copy.xyz  > $Mol$k.xyz
+sed -i "1,$((noa+2)) d" copy.xyz 
+
+# Create an input file 
+if [ "$SP" == "y" ]; then
+
+(echo "! B3LYP D3 ma-def2-SVP
+
+%pal
+nprocs=$CORES
+end
+
+%maxcore $MEM
+
+* xyz $charge $multiplicity" > $Mol$k.inp
+sed -n "3,$((noa+2)) p" $Mol$k.xyz >> $Mol$k.inp
+echo "*
+
+") >> $Mol$k.inp
+
+elif [ "$TS" == "y" ]; then
+
+(echo "! B3LYP D3 ma-def2-SVP OPT 
+
+%pal
+nprocs=$CORES
+end
+
+%maxcore $MEM
+
+%geom" 
+cat const.txt 
+echo "end
+
+* xyz $charge $multiplicity"
+sed -n "3,$((noa+2)) p" $Mol$k.xyz
+echo "*
+
+") > $Mol$k.inp
+
+else
+#(echo "! wB97X-D3 ma-def2-TZVPP OPT
+(echo "! B3LYP D3 ma-def2-SVP OPT
+
+%pal
+nprocs=$CORES
+end
+
+%maxcore $MEM
+
+* xyz $charge $multiplicity" > $Mol$k.inp
+sed -n "3,$((noa+2)) p" $Mol$k.xyz >> $Mol$k.inp
+echo "*
+
+") >> $Mol$k.inp
+
+fi
+done
+
+# Count the conformers
+cnum=$k
+echo "$cnum conformers. Split calculations into subdirectories? (y/n)"
+read split
+
+
+#######################################################################################
+# IF SPLIT OPTION IS CHOSEN, THE CALCULATIONS ARE RUN IN SEPARATE TEMPORARY DIRECTORIES
+# THIS PART OF THE CODE IS HEAVILY "INSPIRED" BY THOMAS GOLIN-ALMEIDA
+#######################################################################################
+
+if [ "$split" == "y" ]; then # Enter information on how to split the calculation. 
+echo "Number of conformers per job?"
+read calcpjob
+
+makejobtemplate () {
+  echo "#!/bin/bash -l
+#SBATCH -J $Mol-b${k}
+#SBATCH -t $time
+#SBATCH --ntasks-per-node $CORES
+#SBATCH --nodes 1
+#SBATCH --account=$acc
+#SBATCH --mem-per-cpu=$MEM
+#SBATCH -p small
+
+module purge
+module load gcc/11.3.0 intel-oneapi-mkl/2022.1.0 openmpi/4.1.4
+
+export ORCA_DIR=$orcabin
+export LD_LIBRARY_PATH=\$ORCA_DIR:\$LD_LIBRARY_PATH
+
+echo exec 'srun \$(echo \"\${@}\" | sed 's/^-np/-n/')' > ./mpirun
+chmod +x ./mpirun
+export PATH=\${SLURM_SUBMIT_DIR}:\${PATH}
+" > $Mol-postgoat.job
+}
+
+
+k=0; j=0; l=1
+mkdir Temp-${k}
+cd Temp-${k}
+makejobtemplate
+
+while [ $l -le $cnum ]; do
+	# Add conformer input file to temp folder and line to job file.
+	echo "\$ORCA_DIR/orca $Mol$l.inp > $Mol$l.out" >> $Mol-postgoat.job
+	mv ../$Mol$l.inp .
+	j=$(($j+1)); l=$(($l+1))
+
+        # Only create a new batch if we hit exactly $calcpjob, but NOT when l == $calcnum
+        if [ "$j" = "$calcpjob" ]; then
+           echo "seff \$SLURM_JOBID" >> $Mol-postgoat.job
+           echo "rm -f  \${SLURM_SUBMIT_DIR}/mpirun" >> $Mol-postgoat.job
+           echo "mv * .." >> $Mol-postgoat.job
+
+            k=$((k+1))
+            mv $Mol-postgoat.job $Mol-postgoat-${k}.job
+            sed -i "s/$Mol-postgoat/$Mol-postgoat-${k}/" $Mol-postgoat-${k}.job
+
+            # Submit job file
+            sbatch $Mol-postgoat-${k}.job
+
+            # Exit the folder, create a new one, and enter.
+            cd ..
+	    mkdir Temp-${k}
+            cd Temp-${k}
+            makejobtemplate
+            j=0
+        fi
+done
+
+# Final submission if any calculations remain unsubmitted
+if [ "$j" -gt 0 ]; then
+    echo "seff \$SLURM_JOBID" >> $Mol-postgoat.job
+    echo "rm -f  \${SLURM_SUBMIT_DIR}/mpirun" >> $Mol-postgoat.job
+    echo "mv * .." >> $Mol-postgoat.job
+
+    k=$((k+1))
+    mv $Mol-postgoat.job $Mol-postgoat-${k}.job
+    sed -i "s/$Mol-postgoat/$Mol-postgoat-${k}/" $Mol-postgoat-${k}.job
+
+    # Submit the final job
+    sbatch $Mol-postgoat-${k}.job
+fi
+
+else
+
+################################################################################
+# IF SPLIT OPTION IS NOT CHOSEN, ONLY ONE job FILE IS RUN IN THE LOCAL DIRECTORY
+################################################################################
+
+# Create .job file
+echo "#!/bin/bash -l
+#SBATCH -J $Mol-batch
+#SBATCH -t $time
+#SBATCH --ntasks-per-node $CORES
+#SBATCH --nodes 1
+#SBATCH --account=$acc
+#SBATCH --mem-per-cpu=$MEM
+#SBATCH -p small
+
+module purge
+module load gcc/11.3.0 intel-oneapi-mkl/2022.1.0 openmpi/4.1.4
+
+export ORCA_DIR=$orcabin
+export LD_LIBRARY_PATH=\$ORCA_DIR:\$LD_LIBRARY_PATH
+
+echo exec 'srun \$(echo \"\${@}\" | sed 's/^-np/-n/')' > ./mpirun
+chmod +x ./mpirun
+export PATH=\${SLURM_SUBMIT_DIR}:\${PATH}" > $Mol-postgoat.job
+
+
+# NOTE TO SELF: THIS IS THE PART THAT NEEDS MODIFICATION IF YOU UPDATE THE SCRIPT.
+l=1
+while [ $l -le $cnum ] #Loop over all conformer input files
+do
+echo "\$ORCA_DIR/orca $Mol$l.inp > $Mol$l.out" >> $Mol-postgoat.job
+l=$(($l+1))
+done
+echo "seff \$SLURM_JOBID" >> $Mol-postgoat.job
+echo "rm -f  \${SLURM_SUBMIT_DIR}/mpirun" >> $Mol-postgoat.job
+
+sbatch $Mol-postgoat.job
+
+fi

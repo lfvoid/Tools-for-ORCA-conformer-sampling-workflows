@@ -1,0 +1,79 @@
+#!/bin/bash
+#Command: NextLevelInput name
+
+##################################################################################################################################
+# Generates a an IRC input file from a previously generated xyz and hess files. It is assumed that the filenames are identical, e.g.
+# filename.xyz and filename.hess
+##################################################################################################################################
+
+# For other users: These are the variables you may want to change:
+acc="kurten"
+orcabin="projappl/kurten/appl_robert/orca_6_0_1_linux_x86-64_shared_openmpi416"
+
+
+g=$(echo $1)
+
+echo "Time?"
+read TIME
+echo "Charge and multiplicity?"
+read cm
+echo "Number of parallel processes?"
+read core
+echo "Memory per core?" 
+read memcore
+echo "Select the partition: small, large, test, etc..."
+read QUEUE
+echo "Level of theory? Method Basis"
+read THEO
+
+# Find the name of the file.
+NAME=`echo "$g.xyz" | cut -d'.' -f1`
+
+( echo "! $THEO IRC
+
+%pal
+nprocs=$core
+end
+
+%maxcore $mem
+
+%irc
+InitHess read
+Hess_Filename \"$NAME.hess\"
+end
+"
+echo "* xyz $cm";
+tail -n +3 $NAME.xyz;
+echo "*" ) > $NAME-IRC.inp
+
+# Create .job file
+echo "#!/bin/bash -l
+#SBATCH -J $NAME-IRC
+#SBATCH -t $TIME
+#SBATCH --ntasks-per-node $core
+#SBATCH --nodes 1
+#SBATCH --account=$acc
+#SBATCH --mem-per-cpu=$memcore
+#SBATCH -p $QUEUE
+
+module purge
+module load gcc/11.3.0 intel-oneapi-mkl/2022.1.0 openmpi/4.1.4
+
+export ORCA_DIR=$orcabin
+export LD_LIBRARY_PATH=\$ORCA_DIR:\$LD_LIBRARY_PATH
+
+echo exec 'srun \$(echo \"\${@}\" | sed 's/^-np/-n/')' > ./mpirun
+chmod +x ./mpirun
+export PATH=\${SLURM_SUBMIT_DIR}:\${PATH}
+
+\$ORCA_DIR/orca $NAME-IRC.inp > $NAME-IRC.out
+rm -f  \${SLURM_SUBMIT_DIR}/mpirun
+seff \$SLURM_JOBID 
+
+rm *tmp     # Remove the temporary files, because ORCA 6.0 does not do it on its own. 
+rm *tmp.0   # Remove the temporary files, because ORCA 6.0 does not do it on its own. 
+" > $NAME-IRC.job
+
+
+sbatch $NAME-IRC.job
+echo "$NAME-IRC.job has been sent to queue."

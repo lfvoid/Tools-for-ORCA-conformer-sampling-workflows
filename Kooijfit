@@ -1,0 +1,16 @@
+#!/bin/bash
+#############################################################################################
+# Script for fitting T-dependent MCTST data to a Kooij function: k(T) = A * T^n * exp(-Ea/T)
+# by Lauri Franzon
+#############################################################################################
+
+# For other users, you may want to change the variable name specifying the location of the python script:
+snakepit="/users/lfranzon/Snakepit"
+
+echo "Name of MCTST rate file? Default is MCTSTRates.txt"
+read filename
+if [ -z "$filename" ]; then filename="MCTSTRates.txt"; fi
+
+
+module load python-data
+python3 $snakepit/Kooij.py $filename

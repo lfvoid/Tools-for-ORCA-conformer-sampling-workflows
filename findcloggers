@@ -1,0 +1,29 @@
+#!/bin/bash
+# Command: findcloggers queue
+
+snakepit="/users/lfranzon/Snakepit"
+
+q=$(echo $1)
+
+squeue > queue.txt
+k=0
+head -1 queue.txt > long.txt
+grep "$q" queue.txt | while read line 
+do
+   k=$(($k+1))
+   timestr=$( echo $line | awk '{print $6}')
+   if [ ${#timestr} -gt 6 ]; then
+    echo $line >> long.txt 
+   fi   
+done
+
+module load python-data
+python3 $snakepit/Printtimes.py
+
+cat Cloggerlist.txt | sed 's/-/ /g' | sort -nk2
+
+rm Cloggerlist.txt
+rm queue.txt
+rm long.txt
+
+
