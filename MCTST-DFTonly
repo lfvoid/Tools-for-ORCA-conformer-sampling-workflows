@@ -28,11 +28,16 @@ ls
 # STEP 1: Extract Coupled-Cluster energy corrections from reactant, TS, and Product files.
 ##########################################################################################
 
+echo "Include tunneling correction? y/n"
+read tunnel
+if [ "$tunnel" == "y" ]; then
+
 echo "Name of PRODUCT Opt/Freq file"
 read PwB
 
 echo "IRC Reactant Opt/Freq output?"
 read IRCR
+fi
 
 #####################################################################
 #STEP 2: Count the R & TS conformers and extract necessary variables.
@@ -114,7 +119,10 @@ for t in $TSOPT*wB.out; do
         ( echo "$k $ener $zpe $gibbs $rots $vibs" ) >> TSconf.txt
 done
 
-# Step 2.3: The same information for the Product
+# Step 2.3: The same information for the IRC reactant and product
+# ONLY PERFORMED IF TUNNELING CORRECTIONS ARE CHOSEN
+
+if [ "$tunnel" == "y" ]; then 
 
 # Write the columns headers for the Product DataFrame.
 (echo -n "n Energy ZPE Gibbs A B C" 
@@ -146,6 +154,7 @@ rots=$(grep "Rotational constants in cm-1:" $IRCR.out | tail -1 | awk '{print $5
 vibs=$(grep "All vibrations are strictly harmonic" -A$lines $IRCR.out | tail -$nov | awk '{print $2}' | xargs | tr ' ' ' ')
 ( echo "0 $IRCener $zpe $gibbs $rots $vibs" ) >> IRCR.txt
 
+fi
 
 ################################################
 # STEP 3: Do all the necessary number crunching.
@@ -162,15 +171,15 @@ echo "High T? Default 315.0 K"
 read highT
 if [ -z "$highT" ]; then highT="315.0"; fi
 
+else
+lowT="298.0"
+highT="298.0"
 fi
 
 echo "Reaction path degeneracy? (Including TS optical symmetry)"
 read Deg
 
-echo "Neglect tunneling effects? If so, type NT for no tunneling."
-read nt
-
 module load python-data
 
 echo "Now starting Python"
-python3 /users/lfranzon/Snakepit/MCTSTHO.py $Trange $lowT $highT 0 0 0 0 0 0 0 0 $Deg $nt
+python3 $snakepit/MCTSTDFTunnel.py $Trange $lowT $highT $REe $REedft $TSEe $TSEedft 0 0 0 0 $Deg $tunnel
