@@ -182,4 +182,4 @@ read Deg
 module load python-data
 
 echo "Now starting Python"
-python3 $snakepit/MCTSTDFTunnel.py $Trange $lowT $highT $REe $REedft $TSEe $TSEedft 0 0 0 0 $Deg $tunnel
+python3 $snakepit/MCTSTDFTunnel.py $Trange $lowT $highT 0 0 0 0 0 0 0 0 $Deg $tunnel
