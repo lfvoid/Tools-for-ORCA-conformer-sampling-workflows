@@ -24,13 +24,20 @@ echo "Number of parallel processes?"
 read core
 echo "Geometry modifier (Hessian, Constraints, Scan), yes/no?" 
 read geom
-if [[ "$geom" == "yes" ]];  then
+
+# Ask if a hess file from a previous calculation should be used.
+if [ "$geom" == "yes" ];  then
 echo "Read Hessian? yes/no?"
 read qh
 nano input.txt 
+fi
+
+# If Frequencies were specified (and written last!) in the keyword input, ask if user wants to turn off rhe quasi-harmonic approximation
+if [ ${key: -4} == "Freq" ] || [ ${key: -4} == "FREQ" ] ; then
 echo "RRHO? yes/no"
 read rrho
 fi
+
 echo "Memory per core?"
 read mem
 echo "Label for filenames?"
@@ -85,13 +92,13 @@ echo "%geom"
 cat input.txt 
 echo "end
 "
+fi
 
 if [[ "$rrho" == "yes" ]];  then
 echo "%freq"
 echo "QuasiRRHO False"
 echo "end
 "
-fi
 fi
 
 
@@ -115,18 +122,20 @@ fi
 if [[ "$geom" == "yes" ]];  then
 echo "%geom"
 cat input.txt 
+
 if [[ "$qh" == "yes" ]];  then
 echo "InHess Read
 InHessName \"$NAME.hess\" "
 fi
 echo "end
 "
+fi
+
 if [[ "$rrho" == "yes" ]];  then
 echo "%freq"
 echo "QuasiRRHO False"
 echo "end
 "
-fi
 fi
 
 echo "* xyz $cm";
