@@ -85,13 +85,6 @@ for f in *$strg*.out; do
 	name=$(echo $f | cut -d '.' -f1)
 	chkstatus
 	getenergy; getzpe; getdipole; countcycles; getgibbs
-	if [ "$status" = "Completed" ]; then 
-		echo "$k $name $energy $dipole $stpoint $cycles $calctime $zpe $G" >> conflist.txt
-	else
-		if [ grep 'error:' $name.out &>/dev/null ]; then echo "$k $name $dipole $energy" >> error.txt
-		else echo "$k $name $dipole $energy" >> running.txt
-		fi
-	fi
 done
 
 mv conflist.txt energies.txt
