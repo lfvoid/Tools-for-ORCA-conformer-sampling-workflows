@@ -85,6 +85,7 @@ for f in *$strg*.out; do
 	name=$(echo $f | cut -d '.' -f1)
 	chkstatus
 	getenergy; getzpe; getdipole; countcycles; getgibbs
+	echo "$k $name $energy $dipole $stpoint $cycles $calctime $zpe $G" >> conflist.txt
 done
 
 mv conflist.txt energies.txt
